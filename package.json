@@ -1,5 +1,5 @@
 {
-  "name": "vajra",
+  "name": "@techiev2/vajra",
   "version": "1.0.0",
   "description": "Blazing-fast, zero-dependency Node.js server with routing, middleware, multipart uploads, and templating. 111 lines · ~95k req/s · ~52 MB idle.",
   "keywords": [
