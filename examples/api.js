@@ -5,12 +5,12 @@ async function getUsers(query = {}) {
   return (await fetch(`https://jsonplaceholder.typicode.com/users?${encode(query)}`)).json()
 }
 
-const { get, post, use, start, setProperty } = Vajra.create();
+const { get, post, use, start, setProperty, log } = Vajra.create();
 
 setProperty({ viewRoot: `${import.meta.dirname}/views` })
 
 use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`);
+  log(`${req.method} ${req.url}`)
   next();
 });
 

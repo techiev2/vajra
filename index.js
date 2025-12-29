@@ -25,8 +25,11 @@ const MAX_MB = 2; const MAX_FILE_SIZE = MAX_MB * 1024 * 1024
 export default class Vajra {
   static #app; static #routes = {}; static #middlewares = []; static #straightRoutes = {}; static #MAX_FILE_SIZE; static #onCreate; static #props = {}
   static create({ maxFileSize } = { maxFileSize: 2 }) {
-    Vajra.#MAX_FILE_SIZE = !+MAX_FILE_SIZE ? +maxFileSize * 1024 * 1024 : MAX_FILE_SIZE
     Vajra.#app = createServer()
+    const _queue = []; const LOG_QUEUE_SIZE = 100; const logOut = () => { if (_queue.length) { process.stdout.write(`${_queue.join('').trim()}\n`) }; _queue.length = 0 };
+    const flushAndShutDown = () => { logOut(); Vajra.#app.close(() => { process.exit(0); }); }; 'SIGINT_SIGTERM_SIGABRT'.split('_').map((evt) => process.on(evt, flushAndShutDown));
+    process.on('exit', logOut); function log(message) { _queue.push(`${message}\n`); if (_queue.length >= LOG_QUEUE_SIZE) { logOut(); _queue.length = 0; } }
+    Vajra.#MAX_FILE_SIZE = !+MAX_FILE_SIZE ? +maxFileSize * 1024 * 1024 : MAX_FILE_SIZE
     Vajra.#app.on('request', async (req, res) => {
       res.sent = false;
       res.status = (/**@type{code} Number*/ code) => {
@@ -104,8 +107,6 @@ export default class Vajra {
       if (typeof fn !== "function") { throw new Error(`${fn} is not a function. Can't use as middleware`) }
       Vajra.#middlewares.push(fn);  return defaults
     }
-    const defaults = Object.freeze(
-      Object.assign({}, { use, setProperty, start }, Object.fromEntries('get__post__put__patch__delete__head__options'.split('__').map((method) => [method, (...args) => register(method, ...args)]))
-    )); return Object.assign({}, { start }, defaults)
+    const defaults = Object.freeze(Object.assign({}, { use, setProperty, start, log }, Object.fromEntries('get__post__put__patch__delete__head__options'.split('__').map((method) => [method, (...args) => register(method, ...args)])))); return Object.assign({}, { start }, defaults)
   }
 }
