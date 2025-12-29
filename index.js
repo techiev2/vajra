@@ -36,13 +36,10 @@ export default class Vajra {
       res.json = data => {
         if (res.sent) return res
         if (!res.statusSet) res.statusCode = 200
-        const response = JSON.stringify(data)
-        res.sent = true; res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Length', Buffer.from(response).byteLength); res.write(response); res.end()
-        return res
+        const response = JSON.stringify(data); res.sent = true; res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Length', Buffer.from(response).byteLength); res.write(response); res.end(); return res
       }
       res.writeMessage = (message = '') => {
-        if (res.sent) return res
-        if (!message) { res.status(500); message = 'Server error'; }
+        if (res.sent) { return res };  if (!message) { res.status(500); message = 'Server error'; }
         res.sent = true; res.setHeader('Content-Type', 'text/plain'); res.setHeader('Content-Length', Buffer.from(message).byteLength); res.write(message); res.end()
         return res
       }
