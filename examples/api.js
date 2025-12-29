@@ -1,0 +1,38 @@
+import Vajra from '../index.js';
+import { encode } from 'node:querystring';
+
+async function getUsers(query = {}) {
+  return (await fetch(`https://jsonplaceholder.typicode.com/users?${encode(query)}`)).json()
+}
+
+const { get, post, use, start, setProperty } = Vajra.create();
+
+setProperty({ viewRoot: `${import.meta.dirname}/views` })
+
+use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+});
+
+get('/', (req, res) => {
+  res.writeMessage('Hello from Vajra ⚡');
+});
+
+post('/upload', (req, res) => {
+  res.json({ received: true, filesCount: req.files.length, files: req.files, body: req.body });
+});
+
+start({ port: 4002 }, () => {
+  console.log('Ready at http://localhost:4002');
+});
+
+get('/api/users', async ({ query }, res) => {
+  const users = await getUsers(query)
+  return res.json({ users })
+})
+
+get('/web/users', async ({ query }, res) => {
+  const users = await getUsers(query)
+  const headers = Object.keys(users[0]).slice(0, 2)
+  return res.html(`users.html`, { users, headers })
+})

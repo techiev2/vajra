@@ -1,0 +1,43 @@
+{
+  "name": "vajra",
+  "version": "1.0.0",
+  "description": "Blazing-fast, zero-dependency Node.js server with routing, middleware, multipart uploads, and templating. 111 lines · ~95k req/s · ~52 MB idle.",
+  "keywords": [
+    "http-server",
+    "web-framework",
+    "minimal",
+    "zero-dependency",
+    "lightweight",
+    "fast",
+    "node-http",
+    "routing",
+    "middleware",
+    "multipart",
+    "form-data",
+    "templating",
+    "html-template",
+    "performance",
+    "tiny",
+    "micro-framework",
+    "self-contained",
+    "no-dependencies"
+  ],
+  "homepage": "https://github.com/techiev2/vajra#readme",
+  "bugs": {
+    "url": "https://github.com/techiev2/vajra/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/techiev2/vajra.git"
+  },
+  "license": "MIT",
+  "author": "Sriram Velamur <sriram.velamur@gmail.com>",
+  "type": "module",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "tests/tests.js"
+  }
+}
