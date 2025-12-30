@@ -59,6 +59,11 @@ export default class Vajra {
         res.sent = true; res.setHeader('Content-Type', 'text/html'); res.setHeader('Content-Length', Buffer.from(content).byteLength); res.write(content); res.end(); return res
       }
       req._headers = { ...req.headers }; req.headers = Object.fromEntries(req.rawHeaders.map((e, i) => i % 2 ? false : [e, req.rawHeaders[i + 1]]).filter(Boolean)); req.isPossibleJSON = req._headers['content-type'] === 'application/json'; req.params = {}
+      res.cookie = (k, v, options) => {
+        let { expires, path, maxAge, domain, secure, httpOnly, sameSite } = typeof options === 'object' ? options : typeof v === 'object' ? v : {}; const cookieOpts = [];!isNaN(+maxAge) && cookieOpts.push(`Max-Age=${Math.floor(maxAge)}`); !isNaN(+expires) && cookieOpts.push(`Expires=${new Date(expires).toUTCString()}`); expires instanceof Date && cookieOpts.push(`Expires=${expires.toUTCString()}`)
+        path && cookieOpts.push(`Path=${path}`); domain && cookieOpts.push(`Domain=${domain}`); !!secure && cookieOpts.push(`Secure`); !!httpOnly && cookieOpts.push(`HttpOnly`); sameSite = sameSite && (sameSite === true ? 'Strict' : typeof sameSite === 'string' ? sameSite.charAt(0).toUpperCase() + sameSite.slice(1).toLowerCase() : ''); !['Strict', 'Lax', 'None'].includes(sameSite) ? sameSite = 'Strict' : sameSite = sameSite; cookieOpts.push(`SameSite=${sameSite}`)
+        res.setHeader('Set-Cookie', (typeof k === 'object') ? Object.entries(k).map(([k_, v_]) => `${k_}=${encodeURIComponent(v_)}${cookieOpts.length ? `; ${cookieOpts.join('; ')}` : ''}`) : [...(res.getHeader('Set-Cookie') || []).filter(Boolean), `${k}=${encodeURIComponent(v)}${cookieOpts.length ? `; ${cookieOpts.join('; ')}` : ''}`])
+      }
       let url = `http://${req.headers.host || req.headers.host}/${req.url}`; req.query = Object.fromEntries(new URL(url).searchParams)
       if (req.method === 'GET' || req.method === 'HEAD') { return runMiddlwares() }
       async function runMiddlwares() {
@@ -66,19 +71,21 @@ export default class Vajra {
         await next();
       }
       setImmediate(() => {
-        req.body = {}; req.rawData = ''; req.formData = {};let dataSize = 0
+        req.body = {}; req.rawData = ''; req.formData = {}; let dataSize = 0
         req.on('data', (chunk) => { dataSize += chunk.length; if (dataSize > Vajra.#MAX_FILE_SIZE) { return default_413(res) }; req.rawData+=chunk })
-        const formDataMatcher = /Content-Disposition: form-data; name=['"](?<name>[^"']+)['"]\s+(?<value>.*?)$/smi; const multiPartMatcher = /--------------------------.*?\r\n/gsmi
-        const fileDataMatcher = /^Content-Disposition:.*?name=["'](?<field>[^"']+)["'].*?filename=["'](?<fileName>[^"']+)["'].*?Content-Type:\s*(?<contentType>[^\r\n]*)\r?\n\r?\n(?<content>[\s\S]*)$/ims
+        const formDataMatcher = /Content-Disposition: form-data; name=['"](?<name>[^"']+)['"]\s+(?<value>.*?)$/smi;
+        let boundaryMatch = (req.headers['Content-Type'] || '').match(/boundary=(.*)/); const boundary = boundaryMatch ? '--' + boundaryMatch[1] : null; const fileDataMatcher = /^Content-Disposition:.*?name=["'](?<field>[^"']+)["'].*?filename=["'](?<fileName>[^"']+)["'].*?Content-Type:\s*(?<contentType>[^\r\n]*)\r?\n\r?\n(?<content>[\s\S]*)$/ims
         req.on('end', async () => {
-          req.files = []; req.rawData.split(multiPartMatcher).filter(Boolean).map((line) => {
-            let key, value; if (line.includes('filename')) { req.files.push(fileDataMatcher.exec(line)?.groups || {}); return }
-            [key, value] = Object.values(line.match(formDataMatcher)?.groups || {}); (key && value) && Object.assign(req.formData, { [key]: value });  return
-          })
+          req.files = []; if (boundary) { req.rawData.split(boundary).filter(Boolean).map((line) => {
+              let key, value; if (line.includes('filename')) { req.files.push(fileDataMatcher.exec(line)?.groups || {}); return }
+              [key, value] = Object.values(line.match(formDataMatcher)?.groups || {}); (key && value) && Object.assign(req.formData, { [key]: value });  return
+            })
+          }
           if (Object.keys(req.formData).length) { req.body = req.formData } else {
             try { req.body = JSON.parse(req.rawData); req.isPossibleJSON = true } catch (_) { req.body = Object.fromEntries(req.rawData.split('&').map((pair) => pair.split('='))) }
           }; setImmediate(runMiddlwares)
         })
+        req.cookies = Object.fromEntries((req.headers.Cookie || req.headers.cookie || '').split(/;\s*/).map((k) => k.split('=')).map(([k, v]) => [k.trim(), decodeURIComponent(v).trim()]))
       })
       async function handleRoute() {
         let match_; const directHandler = (Vajra.#straightRoutes[req.url] || {})[req.method.toLowerCase()]

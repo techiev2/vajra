@@ -15,6 +15,9 @@ use((req, res, next) => {
 });
 
 get('/', (req, res) => {
+  res.cookie('session', 'abc');
+  res.cookie('theme', 'dark');
+  res.cookie('user', 'test');
   res.writeMessage('Hello from Vajra ⚡');
 });
 
