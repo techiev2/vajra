@@ -38,6 +38,6 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "tests/tests.js"
+    "test": "node --watch tests/tests.js"
   }
 }

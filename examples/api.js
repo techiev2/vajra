@@ -5,25 +5,38 @@ async function getUsers(query = {}) {
   return (await fetch(`https://jsonplaceholder.typicode.com/users?${encode(query)}`)).json()
 }
 
-const { get, post, use, start, setProperty, log } = Vajra.create();
+const { get, post, put, use, start, setProperty, log } = Vajra.create();
 
 setProperty({ viewRoot: `${import.meta.dirname}/views` })
 
-use((req, res, next) => {
-  log(`${req.method} ${req.url}`)
-  next();
-});
+// use((req, res, next) => {
+//   log(`${req.method} ${req.url}`)
+//   next();
+// });
 
-get('/', (req, res) => {
+get('/', ({ query = {} }, res) => {
+  const { version } = query
   res.cookie('session', 'abc');
   res.cookie('theme', 'dark');
   res.cookie('user', 'test');
-  res.writeMessage('Hello from Vajra ⚡');
+  res.writeMessage(version ? `Hello from Vajra (v${version}) ⚡` : 'Hello from Vajra ⚡');
+});
+
+get('/query', ({ query, params }, res) => {
+  return res.json({ query, params, now: new Date().getTime() })
 });
 
 post('/upload', (req, res) => {
   res.json({ received: true, filesCount: req.files.length, files: req.files, body: req.body });
 });
+
+post('/post', ({ body, query, params }, res) => {
+  return res.json({ query, params, body, now: new Date().getTime() })
+})
+
+put('/users/:id', ({ params, query, body }, res) => {
+  return res.json({ params, query, body, now: new Date().getTime() })
+})
 
 start({ port: 4002 }, () => {
   console.log('Ready at http://localhost:4002');

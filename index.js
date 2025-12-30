@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { readFile, access } from 'fs/promises'
+import { readFile, access } from 'node:fs/promises'
 
 const BLOCK_MATCHER=/{{\s*#\s*(?<grpStart>\w+)\s*}}\s*(?<block>.*?)\s*{{\s*\/\s*(?<grpEnd>\w+)\s*}}/gmsi; const INNER_BLOCK_MATCHER = /{\s*(.*?)\s*}/gmsi
 const LOOP_MATCHER=/({\s*\w+@\s*})/gmis
@@ -88,12 +88,11 @@ export default class Vajra {
         req.cookies = Object.fromEntries((req.headers.Cookie || req.headers.cookie || '').split(/;\s*/).map((k) => k.split('=')).map(([k, v]) => [k.trim(), decodeURIComponent(v).trim()]))
       })
       async function handleRoute() {
-        let match_; const directHandler = (Vajra.#straightRoutes[req.url] || {})[req.method.toLowerCase()]
+        let _url = req.url.split('?')[0]; if (_url.endsWith('/')) _url = _url.split('/').slice(0, -1).join('/')
+        let match_; const directHandler = (Vajra.#straightRoutes[_url] || Vajra.#straightRoutes[`${_url}/`] || {})[req.method.toLowerCase()]
         if (directHandler) { try { await directHandler(req, res); if (!res.sent && !res.writableEnded) res.end() } catch (error) { return default_500(req, res, error) }; return }
         Object.entries(Vajra.#routes).map(([route, handler]) => {
-          if (match_) { return }
-          if (route === '/' && route !== req.url.split('?')[0]) { return } // FIXME: The case of a bare '/' is not handled right due to the pattern addition.
-          const match = new RegExp(route).exec(req.url); if (!!match && handler[req.method.toLowerCase()]) { match_ = handler; Object.assign(req.params, match.groups); return }
+          if (match_) { return }; const match = new RegExp(route).exec(req.url); if (!!match && handler[req.method.toLowerCase()]) { match_ = handler; Object.assign(req.params, match.groups); return }
         })
         if (!match_) { return default_404(req, res) }
         if (!match_[req.method.toLowerCase()]) { return default_405(req, res) }
@@ -106,13 +105,11 @@ export default class Vajra {
       const paramMatcher = /.*?(?<param>\:[a-zA-Z]{1,})/g; let pathMatcherStr = path
       path.matchAll(paramMatcher).forEach(match => pathMatcherStr = pathMatcherStr.replace(match.groups.param, `{0,1}(?<${match.groups.param.slice(1)}>\\w{1,})`))
       if (path !== '/' && pathMatcherStr.endsWith('/')) { pathMatcherStr = pathMatcherStr.replace(/(\/)$/, '/?') }
-      /*pathMatcherStr = `^${pathMatcherStr}$`; */Vajra.#routes[pathMatcherStr] = Object.assign(Vajra.#routes[pathMatcherStr] || {}, {[method]: handler})
-      if (!paramMatcher.exec(path)?.groups) { Vajra.#straightRoutes[pathMatcherStr] = Object.assign(Vajra.#straightRoutes[pathMatcherStr] || {}, {[method]: handler}) }
-      return defaults
+      if (!paramMatcher.exec(path)?.groups) { Vajra.#straightRoutes[pathMatcherStr] = Object.assign(Vajra.#straightRoutes[pathMatcherStr] || {}, { [method]: handler }); return }
+      Vajra.#routes[pathMatcherStr] = Object.assign(Vajra.#routes[pathMatcherStr] || {}, {[method]: handler}); return defaults
     }
     function use(fn) {
-      if (typeof fn !== "function") { throw new Error(`${fn} is not a function. Can't use as middleware`) }
-      Vajra.#middlewares.push(fn);  return defaults
+      if (typeof fn !== "function") { throw new Error(`${fn} is not a function. Can't use as middleware`) }; Vajra.#middlewares.push(fn);  return defaults
     }
     const defaults = Object.freeze(Object.assign({}, { use, setProperty, start, log }, Object.fromEntries('get__post__put__patch__delete__head__options'.split('__').map((method) => [method, (...args) => register(method, ...args)])))); return Object.assign({}, { start }, defaults)
   }
