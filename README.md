@@ -22,7 +22,10 @@ Like the Vajra, this server delivers maximum power in minimal form.
 
 ## Changelog
 
-### 1.4.0 (Current)
+### 1.4.1 (Current)
+- Added support to handle drift in system time after signing
+
+### 1.4.0 (2025-12-31)
 - Added full HS256 JWT support (`@techiev2/vajra/libs/auth/jwt.js`)
   - Ultra-minimal, zero-dependency implementation
   - Key and header caching for maximum performance
