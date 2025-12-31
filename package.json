@@ -1,6 +1,6 @@
 {
   "name": "@techiev2/vajra",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Blazing-fast, zero-dependency Node.js server with routing, middleware, multipart uploads, and templating. 111 lines · ~95k req/s · ~52 MB idle.",
   "keywords": [
     "http-server",
