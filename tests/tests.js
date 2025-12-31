@@ -1,7 +1,10 @@
 import assert from 'node:assert';
 import { encode } from 'node:querystring';
-import pkg from '../package.json' with {type: 'json'}
 import { suite, test } from 'node:test';
+import { randomBytes, randomUUID } from 'node:crypto';
+
+import pkg from '../package.json' with {type: 'json'}
+import { sign, verify } from '../libs/auth/jwt.js';
 
 async function getResponse(url, method = 'GET', body) {
   return (await fetch(url, !!body ?
@@ -57,5 +60,19 @@ suite('Test HTTP API at port 4002', () => {
       assert.deepEqual(res_params, params)
       assert.deepEqual(res_body, body)
     })
+  })
+})
+
+suite('Tests for library functions', () => {
+  test('Verify that JWT helper returns the right token', async () => {
+    const secret = randomBytes(16).toString('hex')
+    const data = {
+      now: new Date().getTime(),
+      id: randomUUID()
+    }
+    const token = await sign(data, secret)
+    assert.strictEqual(!!token, true)
+    const verified = await verify(token, secret)
+    assert.strict.deepEqual(data, verified)
   })
 })
