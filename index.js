@@ -31,6 +31,7 @@ export default class Vajra {
     process.on('exit', logOut); function log(message) { _queue.push(`${message}\n`); if (_queue.length >= LOG_QUEUE_SIZE) { logOut(); _queue.length = 0; } }
     Vajra.#MAX_FILE_SIZE = !+MAX_FILE_SIZE ? +maxFileSize * 1024 * 1024 : MAX_FILE_SIZE
     Vajra.#app.on('request', async (req, res) => {
+      if (+(req.headers['Content-Length'] || req.headers['content-length']) > Vajra.#MAX_FILE_SIZE) { return default_413(res) }
       res.sent = false;
       res.status = (/**@type{code} Number*/ code) => {
         if (!+code || +code < 100 || +code > 599) { throw new Error(`Invalid status code ${code}`) }
