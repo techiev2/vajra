@@ -11,7 +11,7 @@ async function populateKeyCache(secret) {
 export async function sign(payload, secret, options = {}) {
   if (!payload || typeof payload !== 'object') throw new Error("Payload to sign must be an object"); if (typeof secret !== 'string') throw new Error("Secret must be a string")
   const { signKey } = await populateKeyCache(secret); const { alg = 'HS256' } = options;
-  ENCODED_HEADERS[alg] = ENCODED_HEADERS[alg] || DATA.encoder.encode({ ...DATA.headers.sign, alg }); const encodedPayload = encode(DATA.encoder.encode(JSON.stringify(payload)))
+  ENCODED_HEADERS[alg] = ENCODED_HEADERS[alg] || DATA.encoder.encode({ ...DATA.headers.sign, alg }); const encodedPayload = encode(DATA.encoder.encode(JSON.stringify({ ...payload, _gen_ts: Math.floor(Date.now() / 1000) })))
   const encodedSignature = encode(await subtle.sign('HMAC', signKey, DATA.encoder.encode(`${ENCODED_HEADERS[alg]}.${encodedPayload}`))); return `${ENCODED_HEADERS[alg]}.${encodedPayload}.${encodedSignature}`;
 }
 export async function verify(token, secret) {
@@ -19,5 +19,7 @@ export async function verify(token, secret) {
   const [encodedHeader, encodedPayload, encodedSignature, ..._] = token.split('.'); if (!encodedPayload || !encodedSignature || _.length) throw new Error('Invalid token format');
   const { verifyKey } = await populateKeyCache(secret); const valid = await subtle.verify('HMAC', verifyKey, decode(encodedSignature), DATA.encoder.encode(`${encodedHeader}.${encodedPayload}`));
   if (!valid) throw new Error('Invalid signature'); const payload = JSON.parse(DATA.decoder.decode(decode(encodedPayload)));
-  if (payload.exp && isNaN(+payload.exp)) throw new Error("Expiry must be numeric."); if (payload.exp && Date.now() >= payload.exp * 1000) { throw new Error('Token expired'); } return payload;
+  const genTs = payload._gen_ts; const now = Math.floor(Date.now() / 1000); const maxBackwardDrift = 300;
+  if (typeof genTs === 'number' && (now + maxBackwardDrift < genTs)) { throw new Error('System clock appears to have moved backward — token rejected'); }
+  delete payload._gen_ts; if (payload.exp && isNaN(+payload.exp)) throw new Error("Expiry must be numeric."); if (payload.exp && Date.now() >= payload.exp * 1000) { throw new Error('Token expired'); } return payload;
 }
