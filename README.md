@@ -19,6 +19,25 @@ Like the Vajra, this server delivers maximum power in minimal form.
 [![Node.js version](https://img.shields.io/node/v/@techiev2/vajra.svg?style=flat-square)](https://nodejs.org)
 [![License](https://img.shields.io/npm/l/@techiev2/vajra.svg?style=flat-square)](LICENSE)
 
+
+## Changelog
+
+### 1.4.0 (Current)
+- Added full HS256 JWT support (`@techiev2/vajra/libs/auth/jwt.js`)
+  - Ultra-minimal, zero-dependency implementation
+  - Key and header caching for maximum performance
+  - Robust base64url handling
+  - Numeric exp validation and expiration checks
+
+### 1.3.0 (2025-12-30)
+- Performance improvements to routing in bare routes
+
+### 1.2.0 (2025-12-30)
+- Adds cookie support
+
+### 1.0.0 (2025-12-25)
+- Initial release
+
 ## Features
 
 - Zero external dependencies
