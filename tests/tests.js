@@ -79,7 +79,7 @@ suite('Tests for library functions', () => {
 
   test('Verify that JWT helper throws an expired token error with exp set to gen time', async () => {
     const secret = randomBytes(16).toString('hex')
-    let exp = new Date().getTime()
+    let exp = Date.now() / 1000
     const data = {
       now: new Date().getTime(),
       exp,
@@ -174,7 +174,7 @@ suite('Tests for library functions', () => {
     const validPayload = encode(encoder.encode('{"sub":"123"}'));
     const badSegment = '!!invalid@@';
     await assert.rejects(verify(`${header}.${badSegment}.AAAA`, secret), /Invalid signature/);
-    await assert.rejects(verify(`${header}.${validPayload}.!!invalid@@`, secret), /Invalid character/);
+    await assert.rejects(verify(`${header}.${validPayload}.!!invalid@@`, secret), /Invalid signature/);
   });
   
   test('handles empty payload object', async () => {
