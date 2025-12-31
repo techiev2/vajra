@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { encode } from 'node:querystring';
-import { suite, test } from 'node:test';
+import { afterEach, beforeEach, suite, test } from 'node:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 import pkg from '../package.json' with {type: 'json'}
@@ -16,6 +16,7 @@ async function getResponse(url, method = 'GET', body) {
 async function getJSON(url, method = 'GET', body) {
   return (await getResponse(url, method, body)).json()
 }
+
 
 suite('Test HTTP API at port 4002', () => {
   const BASE_URL = 'http://localhost:4002'
@@ -64,7 +65,18 @@ suite('Test HTTP API at port 4002', () => {
 })
 
 suite('Tests for library functions', () => {
-  const encoder = new TextEncoder(); const signHeaders = { alg: 'HS256', typ: 'JWT' }
+  const encoder = new TextEncoder(); const signHeaders = { alg: 'HS256', typ: 'JWT' }; let timeOffsetMs = 0;
+  // const originalDateNow = Date.now;
+  // Date.now = function () { return originalDateNow() + timeOffsetMs; };
+  function setupMockTimer(timing) {
+    const originalNow = globalThis.Date.now
+    let timeDelta = timing
+    globalThis.Date.now = () => { return originalNow() + (timeDelta || 0) }
+  }
+  async function withMockTimer(timeDelta, fn) {
+    setupMockTimer(timeDelta)
+    await fn()
+  }
   test('Verify that JWT helper returns the right token', async () => {
     const secret = randomBytes(16).toString('hex')
     const data = {
@@ -99,7 +111,7 @@ suite('Tests for library functions', () => {
     await assert.rejects(verify('a..c', secret),);
     await assert.rejects(verify('a.b.', secret),);
   });
-  
+
   test('rejects tampered signature', async () => {
     const token = await sign({a:1}, 'secret');
     const tampered = token.slice(0, -1) + (token.at(-1) === 'A' ? 'B' : 'A');
@@ -120,7 +132,7 @@ suite('Tests for library functions', () => {
     const verified = await verify(token, secret);
     assert.deepStrictEqual(verified, payload);
   });
-  
+
   test('rejects token with future exp after clock advances', async () => {
     const secret = 's';
     const past = Math.floor(Date.now() / 1000) - 3600;
@@ -128,7 +140,7 @@ suite('Tests for library functions', () => {
     const token = await sign(payload, secret);
     await assert.rejects(verify(token, secret), /Token expired/);
   });
-  
+
   test('handles large payload without truncation', async () => {
     const secret = 's';
     const large = { data: 'x'.repeat(5000), arr: Array(100).fill(42) };
@@ -144,13 +156,13 @@ suite('Tests for library functions', () => {
     const badToken = `${header}.${badPayload}.${fakeSig}`;
     await assert.rejects(verify(badToken, 'secret'), /Invalid signature/);
   });
-  
+
   test('rejects non-object payload on sign', async () => {
     await assert.rejects(sign('string', 'secret'));
     await assert.rejects(sign(null, 'secret'));
     await assert.rejects(sign(123, 'secret'));
   });
-  
+
   // Add to existing suite
   test('rejects non-numeric exp claim', async () => {
     const secret = 's';
@@ -158,7 +170,7 @@ suite('Tests for library functions', () => {
     const token = await sign(payload, secret);
     await assert.rejects(verify(token, secret), /Expiry must be numeric/);
   });
-  
+
   test('handles clock skew edge case', async () => {
     const secret = 's';
     const now = Math.floor(Date.now() / 1000);
@@ -167,7 +179,7 @@ suite('Tests for library functions', () => {
     await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
     await assert.rejects(verify(token, secret), /Token expired/);
   });
-  
+
   test('rejects malformed base64url segments', async () => {
     const secret = 's';
     const header = encode(encoder.encode(JSON.stringify(signHeaders)));
@@ -176,7 +188,7 @@ suite('Tests for library functions', () => {
     await assert.rejects(verify(`${header}.${badSegment}.AAAA`, secret), /Invalid signature/);
     await assert.rejects(verify(`${header}.${validPayload}.!!invalid@@`, secret), /Invalid signature/);
   });
-  
+
   test('handles empty payload object', async () => {
     const secret = 's';
     const payload = {};
@@ -184,7 +196,7 @@ suite('Tests for library functions', () => {
     const verified = await verify(token, secret);
     assert.deepStrictEqual(verified, payload);
   });
-  
+
   test('rejects very weak secret', async () => {
     const secret = 'a'; // Short but still works (crypto allows it)
     const payload = { sub: '123' };
@@ -192,5 +204,99 @@ suite('Tests for library functions', () => {
     const verified = await verify(token, secret);
     assert.deepStrictEqual(verified, payload);
   });
+
+  test('clock drift: expired token should NOT become valid when clock moves backward', async () => {
+    const secret = randomBytes(16).toString('hex');
+    const issueTime = Date.now();
+    const payload = { sub: 'test-user', exp: Math.floor((issueTime + 5000) / 1000) }; // Set expiry of 5 seconds
+    const token = await sign(payload, secret);
+    setupMockTimer(10000)
+    await assert.rejects(verify(token, secret), /Token expired/);
+    setupMockTimer(-3000000)
+    await assert.rejects(verify(token, secret), /System clock appears to have moved backward/);
+  });
+
+  test('clock drift: small backward drift does not falsely reject', async () => {
+    const secret = randomBytes(16).toString('hex');
+    const issueTime = Date.now();
+    const payload = { sub: 'test', exp: Math.floor((issueTime + 3600000) / 1000) };
+    const token = await sign(payload, secret);
+    setupMockTimer(-120000)
+    const verified = await verify(token, secret);
+    assert.strictEqual(verified.sub, 'test');
+  });
+
+  test('clock drift: small backward drift within leeway should be tolerated', async () => {
+    const secret = randomBytes(16).toString('hex');
+    const issueTime = Date.now();
+    const payload = { exp: Math.floor((issueTime + 5000) / 1000) };
+    const token = await sign(payload, secret);
+    setupMockTimer(-30000)
+    assert.deepStrictEqual(await verify(token, secret), payload);
+  });
+
+  test('clock drift: large backward jump should reject even non-expired token', async () => {
+    const secret = randomBytes(16).toString('hex');
+    const issueTime = Date.now();
+    const payload = { sub: 'drift-test', exp: Math.floor((issueTime + 3600000) / 1000) };
+    const token = await sign(payload, secret);
+    setupMockTimer(1000)
+    const verified = await verify(token, secret);
+    assert.strictEqual(verified.sub, 'drift-test');
+    setupMockTimer(-8640000);
+    await assert.rejects(
+      verify(token, secret),
+      /System clock appears to have moved backward — token rejected/
+    );
+  });
   
+  test('clock drift: forward jump should not falsely expire valid token', async () => {
+    const secret = randomBytes(16).toString('hex');
+    const issueTime = Date.now();
+    const payload = { exp: Math.floor((issueTime + 3600000) / 1000) }; // 1 hour valid
+    const token = await sign(payload, secret);
+    // Jump forward 30 minutes — should still be valid
+    setupMockTimer(1800000)
+    const verified = await verify(token, secret);
+    assert.ok(verified);
+  });
+
+  test('clock drift: large rollback rejects all tokens regardless of individual exp', async () => {
+    const secret = randomBytes(16).toString('hex');
+    const baseTime = Date.now();
+    const payloads = [
+      { id: 'expired', exp: Math.floor((baseTime + 5000) / 1000) },
+      { id: 'valid', exp: Math.floor((baseTime + 3600000) / 1000) }
+    ];
+    const [expiredToken, validToken] = await Promise.all([
+      sign(payloads[0], secret),
+      sign(payloads[1], secret)
+    ]);
+    await withMockTimer(-720000, async () => {
+      await Promise.all([
+        assert.rejects(verify(expiredToken, secret), /System clock appears to have moved backward/),
+        assert.rejects(verify(validToken, secret), /System clock appears to have moved backward/)
+      ])
+    })
+  })
+
+  test('clock drift: large rollback rejects all tokens regardless of individual exp', async () => {
+    const secret = randomBytes(16).toString('hex');
+    const baseTime = Date.now();
+    const payloads = [
+      { id: 'expired', exp: Math.floor((baseTime + 5000) / 1000) },
+      { id: 'valid', exp: Math.floor((baseTime + 3600000) / 1000) }
+    ];
+    const [expiredToken, validToken] = await Promise.all([
+      sign(payloads[0], secret),
+      sign(payloads[1], secret)
+    ]);
+    await withMockTimer(-1000000, async () => {
+      await Promise.all([
+        assert.rejects(verify(expiredToken, secret), /System clock appears to have moved backward/),
+        assert.rejects(verify(validToken, secret), /System clock appears to have moved backward/)
+      ])
+    })
+  });
+
 })
