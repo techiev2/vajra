@@ -1,8 +1,9 @@
 import { createServer } from 'node:http'
 import { readFile, access } from 'node:fs/promises'
+import { resolve, isAbsolute } from 'path'
 
 const BLOCK_MATCHER=/{{\s*#\s*(?<grpStart>\w+)\s*}}\s*(?<block>.*?)\s*{{\s*\/\s*(?<grpEnd>\w+)\s*}}/gmsi; const INNER_BLOCK_MATCHER = /{\s*(.*?)\s*}/gmsi
-const LOOP_MATCHER=/({\s*\w+@\s*})/gmis
+const LOOP_MATCHER=/({\s*\w+@\s*})/gmis; const ESCAPE = { regex: /[&<>"']/g, map: { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' }}
 
 function default_404({ url, method, isPossibleJSON }, res) {
   const message = `Route ${url} not found for method ${method}.`
@@ -32,14 +33,9 @@ export default class Vajra {
     Vajra.#MAX_FILE_SIZE = !+MAX_FILE_SIZE ? +maxFileSize * 1024 * 1024 : MAX_FILE_SIZE
     Vajra.#app.on('request', async (req, res) => {
       if (+(req.headers['Content-Length'] || req.headers['content-length']) > Vajra.#MAX_FILE_SIZE) { return default_413(res) }
-      res.sent = false;
-      res.status = (/**@type{code} Number*/ code) => {
-        if (!+code || +code < 100 || +code > 599) { throw new Error(`Invalid status code ${code}`) }
-        res.statusCode = code; res.statusSet = true; return res
-      }
+      res.sent = false; res.status = (/**@type{code} Number*/ code) => { if (!+code || +code < 100 || +code > 599) { throw new Error(`Invalid status code ${code}`) }; res.statusCode = code; res.statusSet = true; return res }
       res.json = data => {
-        if (res.sent) return res
-        if (!res.statusSet) res.statusCode = 200
+        if (res.sent) return res; if (!res.statusSet) res.statusCode = 200
         const response = JSON.stringify(data); res.sent = true; res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Length', Buffer.from(response).byteLength); res.write(response); res.end(); return res
       }
       res.writeMessage = (message = '') => {
@@ -47,17 +43,17 @@ export default class Vajra {
         res.sent = true; res.setHeader('Content-Type', 'text/plain'); res.setHeader('Content-Length', Buffer.from(message).byteLength); res.write(message); res.end()
         return res
       }
+      function sanitize(value) { if (value == null) return ''; return String(value).replace(ESCAPE.regex, m => ESCAPE.map[m]); }
       res.html = async (templatePath, data = {}) => {
-        if (res.sent) { return res }; let content;
-        if (this.#props.viewRoot) templatePath = `${this.#props.viewRoot}/${templatePath}`
+        templatePath = resolve(templatePath); const appRoot = resolve(process.cwd()); const root = this.#props.viewRoot ? resolve(this.#props.viewRoot) : appRoot;
+        const _templatePath = resolve(`${root}/${templatePath}`)
+        if (templatePath.includes('..') || !_templatePath.startsWith(appRoot) || !root.startsWith(appRoot)) { return default_500(req, res, new Error("Invalid template path")) }
+        if (res.sent) { return res }; let content; templatePath = `${root}/${_templatePath}`
         try { await access(templatePath); content = (await readFile(templatePath)).toString() } catch (_) { content = templatePath }
-        content.matchAll(BLOCK_MATCHER).forEach((match) => {
-          if (!match?.groups || (match.groups.grpStart !== match.groups.grpEnd)) { return }
-          const data_ = (data[match.groups.grpStart] || []); if (match.groups.block.indexOf('@') !== -1) { content = content.replace(match[2], data_.map((key) => match.groups.block.replace(LOOP_MATCHER, key)).join('')); return }
-          data_.forEach((dataItem) => { match.groups.block.matchAll(INNER_BLOCK_MATCHER).forEach((_match) => { const parts = _match[1].split('.').slice(1); let value = dataItem; parts.forEach((part) => (value = value ? value[part] : value)) ; content = content.replace(_match[0], value) }) })
+        content.matchAll(BLOCK_MATCHER).forEach((match) => { if (!match?.groups || (match.groups.grpStart !== match.groups.grpEnd)) { return }; const data_ = (data[match.groups.grpStart] || []); if (match.groups.block.indexOf('@') !== -1) { content = content.replace(match[2], data_.map((key) => match.groups.block.replace(LOOP_MATCHER, sanitize(key))).join('')); return }
+          if (!data_.length) { content = content.replace(match.groups.block, '') } else { data_.forEach((dataItem) => { match.groups.block.matchAll(INNER_BLOCK_MATCHER).forEach((_match) => { const parts = _match[1].split('.').slice(1); let value = dataItem; parts.forEach((part) => (value = value ? value[part] : value)); content = content.replace(_match[0], sanitize(value)) }) }) }
         }); content = content.replace(/{{\s*# .*?\s*}}/gmsi, '').replace(/{{\s*\/.*?}}/gmsi, '')
-        if (!res.statusSet) res.statusCode = 200
-        res.sent = true; res.setHeader('Content-Type', 'text/html'); res.setHeader('Content-Length', Buffer.from(content).byteLength); res.write(content); res.end(); return res
+        if (!res.statusSet) res.statusCode = 200; res.sent = true; res.setHeader('Content-Type', 'text/html'); res.setHeader('Content-Length', Buffer.from(content).byteLength); res.write(content); res.end(); return res
       }
       req._headers = { ...req.headers }; req.headers = Object.fromEntries(req.rawHeaders.map((e, i) => i % 2 ? false : [e, req.rawHeaders[i + 1]]).filter(Boolean)); req.isPossibleJSON = req._headers['content-type'] === 'application/json'; req.params = {}
       res.cookie = (k, v, options) => {
@@ -67,10 +63,7 @@ export default class Vajra {
       }
       let url = `http://${req.headers.host || req.headers.host}/${req.url}`; req.query = Object.fromEntries(new URL(url).searchParams)
       if (req.method === 'GET' || req.method === 'HEAD') { return runMiddlwares() }
-      async function runMiddlwares() {
-        let idx = 0; const next = async () => { if (idx >= Vajra.#middlewares.length) { return setImmediate(handleRoute) } const fn = Vajra.#middlewares[idx]; idx++; try { await fn(req, res, next); } catch (err) { return default_500({ url: req.url, method: req.method }, res, err); } };
-        await next();
-      }
+      async function runMiddlwares() { let idx = 0; const next = async () => { if (idx >= Vajra.#middlewares.length) { return setImmediate(handleRoute) } const fn = Vajra.#middlewares[idx]; idx++; try { await fn(req, res, next); } catch (err) { return default_500({ url: req.url, method: req.method }, res, err); } }; await next(); }
       setImmediate(() => {
         req.body = {}; req.rawData = ''; req.formData = {}; let dataSize = 0
         req.on('data', (chunk) => { dataSize += chunk.length; if (dataSize > Vajra.#MAX_FILE_SIZE) { return default_413(res) }; req.rawData+=chunk })
