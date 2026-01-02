@@ -104,7 +104,7 @@ export default class Vajra {
     function start({ port, host = '127.0.0.1' }, cb) { Vajra.#app.listen(port, () => { console.log(`App listening at http://${host}:${port}`); if (typeof cb === 'function') { cb() } }); return defaults }
     function register(method, path, handler) {
       const paramMatcher = /.*?(?<param>\:[a-zA-Z]{1,})/g; let pathMatcherStr = path
-      path.matchAll(paramMatcher).forEach(match => pathMatcherStr = pathMatcherStr.replace(match.groups.param, `{0,1}(?<${match.groups.param.slice(1)}>\\w{1,})`))
+      path.matchAll(paramMatcher).forEach(match => pathMatcherStr = pathMatcherStr.replace(match.groups.param, `{0,1}(?<${match.groups.param.slice(1)}>[\\w|\.]+)`))
       if (path !== '/' && pathMatcherStr.endsWith('/')) { pathMatcherStr = pathMatcherStr.replace(/(\/)$/, '/?') }
       if (!paramMatcher.exec(path)?.groups) { Vajra.#straightRoutes[pathMatcherStr] = Object.assign(Vajra.#straightRoutes[pathMatcherStr] || {}, { [method]: handler }); return }
       Vajra.#routes[pathMatcherStr] = Object.assign(Vajra.#routes[pathMatcherStr] || {}, {[method]: handler}); return defaults
