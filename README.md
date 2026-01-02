@@ -22,7 +22,13 @@ Like the Vajra, this server delivers maximum power in minimal form.
 
 ## Changelog
 
-### 1.4.1 (Current)
+### 1.4.3 (2026-01-02)
+- Adds guardrails for unsafe operations with template paths.
+
+### 1.4.2 (2026-01-02)
+- Fixes bug in parsing params that dropped file extensions.
+
+### 1.4.1 (2026-01-01)
 - Added support to handle drift in system time after signing
 
 ### 1.4.0 (2025-12-31)
