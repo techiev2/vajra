@@ -1,25 +1,16 @@
 import { createServer } from 'node:http'
 import { readFile, access } from 'node:fs/promises'
-import { resolve, isAbsolute } from 'path'
+import { createReadStream, existsSync } from 'node:fs'
+import { resolve } from 'path'
 
 const BLOCK_MATCHER=/{{\s*#\s*(?<grpStart>\w+)\s*}}\s*(?<block>.*?)\s*{{\s*\/\s*(?<grpEnd>\w+)\s*}}/gmsi; const INNER_BLOCK_MATCHER = /{\s*(.*?)\s*}/gmsi
 const LOOP_MATCHER=/({\s*\w+@\s*})/gmis; const ESCAPE = { regex: /[&<>"']/g, map: { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' }}
+const MIMES={html: 'text/html; charset=utf-8',js: 'application/javascript; charset=utf-8',css: 'text/css; charset=utf-8',json: 'application/json; charset=utf-8',png: 'image/png',jpg: 'image/jpeg',jpeg: 'image/jpeg',gif: 'image/gif',svg: 'image/svg+xml', webp: 'image/webp', txt: 'text/plain; charset=utf-8'}
 
-function default_404({ url, method, isPossibleJSON }, res) {
-  const message = `Route ${url} not found for method ${method}.`
-  res.status(404); return isPossibleJSON ? res.json({ message }) : res.writeMessage(message)
-}
-function default_405({ url, method, isPossibleJSON }, res) {
-  const message = `Method ${method} not allowed by route ${url}.`
-  res.status(405); return isPossibleJSON ? res.json({ message }) : res.writeMessage(message)
-}
-function default_500({ url, method }, res, error) {
-  process.env.DEBUG && console.log({ error })
-  res.status(500).writeMessage(process.env.DEBUG ? `${error.stack}` : `Server error.\nRoute: ${url}\nMethod: ${method}\nTimestamp: ${new Date().getTime()}\n`)
-}
-function default_413(res) {
-  res.status(413).writeMessage('Payload Too Large')
-}
+function default_404({ url, method, isPossibleJSON }, res, message) { message = message || `Route ${url} not found for method ${method}.`; res.status(404); return isPossibleJSON ? res.json({ message }) : res.writeMessage(message) }
+function default_405({ url, method, isPossibleJSON }, res, message) { message = message || `Method ${method} not allowed by route ${url}.`; res.status(405); return isPossibleJSON ? res.json({ message }) : res.writeMessage(message) }
+function default_500({ url, method }, res, error) { process.env.DEBUG && console.log({ error }); res.status(500).writeMessage(process.env.DEBUG && error?.stack ? `${error.stack}` : `Server error.\nRoute: ${url}\nMethod: ${method}\nTimestamp: ${new Date().getTime()}\n`) }
+function default_413(res) { res.status(413).writeMessage('Payload Too Large') }
 
 const MAX_MB = 2; const MAX_FILE_SIZE = MAX_MB * 1024 * 1024
 
@@ -36,13 +27,19 @@ export default class Vajra {
       res.sent = false; res.status = (/**@type{code} Number*/ code) => { if (!+code || +code < 100 || +code > 599) { throw new Error(`Invalid status code ${code}`) }; res.statusCode = code; res.statusSet = true; return res }
       res.json = data => {
         if (res.sent) return res; if (!res.statusSet) res.statusCode = 200
-        const response = JSON.stringify(data); res.sent = true; res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Length', Buffer.from(response).byteLength); res.write(response); res.end(); return res
+        const _data = JSON.stringify(data); res.sent = true; res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Length', Buffer.byteLength(_data)); res.write(_data); res.end(); return res
       }
       res.writeMessage = (message = '') => {
         if (res.sent) { return res };  if (!message) { res.status(500); message = 'Server error'; }
-        res.sent = true; res.setHeader('Content-Type', 'text/plain'); res.setHeader('Content-Length', Buffer.from(message).byteLength); res.write(message); res.end()
+        res.sent = true; res.setHeader('Content-Type', 'text/plain'); res.setHeader('Content-Length', Buffer.byteLength(message)); res.write(message); res.end()
         return res
       }
+      res.sendFile = (filePath) => {
+        let [filePath_, extension] = filePath.split('.')
+        const _filePath = !extension ? filePath : existsSync(filePath) ? filePath : existsSync(`${filePath_}.${extension.toLowerCase()}`) ? `${filePath_}.${extension.toLowerCase()}` : existsSync(`${filePath_}.${extension.toUpperCase()}`) ? `${filePath_}.${extension.toLowerCase()}` : ''
+        if (!filePath) { return default_404(req, res, new Error(`File ${filePath} not found`)) }
+        return new Promise((resolve) => createReadStream(_filePath).on('open', () => { res.setHeader('Content-Type', MIMES[filePath.split('.').pop()?.toLowerCase()] || 'application/octet-stream'); !res.getHeader('Accept-Ranges') && res.setHeader('Accept-Ranges', 'bytes'); }).on('error', (err) => { (err.code === 'ENOENT' ? default_404(req, res, `${filePath.split('/').slice(-1)} not found.`) : default_500(req, res, err)); resolve() }).pipe(res).on('finish', resolve).on('error', resolve))
+      };
       function sanitize(value) { if (value == null) return ''; return String(value).replace(ESCAPE.regex, m => ESCAPE.map[m]); }
       res.html = async (templatePath, data = {}) => {
         templatePath = resolve(templatePath); const appRoot = resolve(process.cwd()); const root = this.#props.viewRoot ? resolve(this.#props.viewRoot) : appRoot;
@@ -70,19 +67,19 @@ export default class Vajra {
         const formDataMatcher = /Content-Disposition: form-data; name=['"](?<name>[^"']+)['"]\s+(?<value>.*?)$/smi;
         let boundaryMatch = (req.headers['Content-Type'] || '').match(/boundary=(.*)/); const boundary = boundaryMatch ? '--' + boundaryMatch[1] : null; const fileDataMatcher = /^Content-Disposition:.*?name=["'](?<field>[^"']+)["'].*?filename=["'](?<fileName>[^"']+)["'].*?Content-Type:\s*(?<contentType>[^\r\n]*)\r?\n\r?\n(?<content>[\s\S]*)$/ims
         req.on('end', async () => {
-          req.files = []; if (boundary) { req.rawData.split(boundary).filter(Boolean).map((line) => {
+          req.files = []; if (boundary) {
+            req.rawData.split(boundary).filter(Boolean).map((line) => {
               let key, value; if (line.includes('filename')) { req.files.push(fileDataMatcher.exec(line)?.groups || {}); return }
-              [key, value] = Object.values(line.match(formDataMatcher)?.groups || {}); (key && value) && Object.assign(req.formData, { [key]: value });  return
+              [key, value] = Object.values(line.match(formDataMatcher)?.groups || {}); (key && value) && Object.assign(req.formData, { [key]: value }); return
             })
           }
           if (Object.keys(req.formData).length) { req.body = req.formData } else {
             try { req.body = JSON.parse(req.rawData); req.isPossibleJSON = true } catch (_) { req.body = Object.fromEntries(req.rawData.split('&').map((pair) => pair.split('='))) }
           }; setImmediate(runMiddlwares)
-        })
-        req.cookies = Object.fromEntries((req.headers.Cookie || req.headers.cookie || '').split(/;\s*/).map((k) => k.split('=')).map(([k, v]) => [k.trim(), decodeURIComponent(v).trim()]))
+        }); req.cookies = Object.fromEntries((req.headers.Cookie || req.headers.cookie || '').split(/;\s*/).map((k) => k.split('=')).map(([k, v]) => [k.trim(), decodeURIComponent(v).trim()]))
       })
       async function handleRoute() {
-        let _url = req.url.split('?')[0]; if (_url.endsWith('/')) _url = _url.split('/').slice(0, -1).join('/')
+        req.url = decodeURIComponent(req.url); let _url = req.url.split('?')[0]; if (_url.endsWith('/')) _url = _url.split('/').slice(0, -1).join('/')
         let match_; const directHandler = (Vajra.#straightRoutes[_url] || Vajra.#straightRoutes[`${_url}/`] || {})[req.method.toLowerCase()]
         if (directHandler) { try { await directHandler(req, res); if (!res.sent && !res.writableEnded) res.end() } catch (error) { return default_500(req, res, error) }; return }
         Object.entries(Vajra.#routes).map(([route, handler]) => {
@@ -97,7 +94,7 @@ export default class Vajra {
     function start({ port, host = '127.0.0.1' }, cb) { Vajra.#app.listen(port, () => { console.log(`App listening at http://${host}:${port}`); if (typeof cb === 'function') { cb() } }); return defaults }
     function register(method, path, handler) {
       const paramMatcher = /.*?(?<param>\:[a-zA-Z]{1,})/g; let pathMatcherStr = path
-      path.matchAll(paramMatcher).forEach(match => pathMatcherStr = pathMatcherStr.replace(match.groups.param, `{0,1}(?<${match.groups.param.slice(1)}>[\\w|\.]+)`))
+      path.matchAll(paramMatcher).forEach(match => pathMatcherStr = pathMatcherStr.replace(match.groups.param, `{0,1}(?<${match.groups.param.slice(1)}>[\\w|\\/|\\.|\\s|\\-]+)`))
       if (path !== '/' && pathMatcherStr.endsWith('/')) { pathMatcherStr = pathMatcherStr.replace(/(\/)$/, '/?') }
       if (!paramMatcher.exec(path)?.groups) { Vajra.#straightRoutes[pathMatcherStr] = Object.assign(Vajra.#straightRoutes[pathMatcherStr] || {}, { [method]: handler }); return }
       Vajra.#routes[pathMatcherStr] = Object.assign(Vajra.#routes[pathMatcherStr] || {}, {[method]: handler}); return defaults

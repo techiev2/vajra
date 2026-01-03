@@ -52,3 +52,7 @@ get('/web/users', async ({ query }, res) => {
   const headers = Object.keys(users[0]).slice(0, 2)
   return res.html(`users.html`, { users, headers })
 })
+
+get('/files/:path', async ({ params, params: { path }}, res) => {
+  return res.sendFile(`${import.meta.dirname}/${path}`)
+})
