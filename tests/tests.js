@@ -2,6 +2,8 @@ import assert from 'node:assert';
 import { encode } from 'node:querystring';
 import { afterEach, beforeEach, suite, test } from 'node:test';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import path, { resolve } from 'node:path';
 
 import pkg from '../package.json' with {type: 'json'}
 import { sign, verify } from '../libs/auth/jwt.js';
@@ -17,9 +19,9 @@ async function getJSON(url, method = 'GET', body) {
   return (await getResponse(url, method, body)).json()
 }
 
+const BASE_URL = 'http://localhost:4002'
 
 suite('Test HTTP API at port 4002', () => {
-  const BASE_URL = 'http://localhost:4002'
   suite('Test HTTP GET', () => {
     test('Basic HTTP GET to respond with a now and empty query/params', async () => {
       assert.deepEqual((await (await getResponse(BASE_URL)).text()), 'Hello from Vajra ⚡')
@@ -34,6 +36,48 @@ suite('Test HTTP API at port 4002', () => {
       assert.equal(!!now, true)
       assert.deepEqual(res_query, query)
       assert.deepEqual(res_params, {})
+    })
+    test('Plain ../ traversal should be normalized by URL parser and result in 404 (safe)', async () => {
+      const url = `${BASE_URL}/files/../../../../etc/passwd`
+      const res = await getResponse(url)
+      // It should NOT succeed (200) and typically 404 because file doesn't exist inside app root
+      assert.notStrictEqual(res.status, 200)
+      assert.strictEqual(res.status, 404)
+    })
+    
+    test('URL-encoded ../ (%2e%2e) should be decoded BEFORE normalization, still resulting in safe 404', async () => {
+      const url = `${BASE_URL}/files/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd`
+      const res = await getResponse(url)
+      assert.notStrictEqual(res.status, 200)
+      // Expected: pathname becomes /etc/passwd → safe 404
+    })
+    
+    test('Double-encoded traversal should also be normalized safely', async () => {
+      const url = `${BASE_URL}/files/%252e%252e/%252e%252e/%252e%252e/%252e%252e/etc/passwd`
+      const res = await getResponse(url)
+      assert.notStrictEqual(res.status, 200)
+    })
+    
+    test('Attempt with null byte (old exploit) should not crash and return error', async () => {
+      // Note: modern Node.js rejects %00 in URLs early, often with parse error
+      const url = `${BASE_URL}/files/test_files/hello.txt%00../../etc/passwd`
+      const res = await getResponse(url)
+      assert.notStrictEqual(res.status, 200)
+      // Likely 400 or 404 depending on framework
+    })
+    
+    test('Absolute path attempt should be treated as relative (inside app root) and 404', async () => {
+      const url = `${BASE_URL}/files//etc/passwd`  // leading // becomes /
+      const res = await getResponse(url)
+      assert.notStrictEqual(res.status, 200)
+    })
+    
+    test('Very deep normalized path (many ../ collapsing to root) should still be safe', async () => {
+      const deep = '../'.repeat(50) + 'hello.txt'
+      const url = `${BASE_URL}/files/${deep}`
+      const res = await getResponse(url)
+      // After normalization: /hello.txt → tries to open hello.txt in app root → 404 (unless exists)
+      assert.strictEqual(res.status, 404)  // or whatever your non-existent handler returns
     })
   })
   suite('Test HTTP POST', () => {
@@ -300,3 +344,162 @@ suite('Tests for library functions', () => {
   });
 
 })
+
+
+suite('res.sendFile(path)', async () => {
+
+  const TEST_DIR = path.resolve(`${import.meta.dirname}/../examples/test_files`);
+  const textContent = 'Hello from Vajra!\nThis is a test file.'
+  const textContentBuffer = new Uint8Array(Buffer.from(textContent))
+  const minimalJpeg = Buffer.from([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+    0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43,
+    0x00, 0x03, 0x02, 0x02, 0x03, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x04,
+    0x03, 0x03, 0x04, 0x05, 0x08, 0x05, 0x05, 0x04, 0x04, 0x05, 0x0a, 0x07,
+    0x07, 0x06, 0x08, 0x0c, 0x0a, 0x0c, 0x0c, 0x0b, 0x0a, 0x0b, 0x0b, 0x0d,
+    0x0e, 0x12, 0x10, 0x0d, 0x0e, 0x11, 0x0e, 0x0b, 0x0b, 0x10, 0x16, 0x10,
+    0x11, 0x13, 0x14, 0x15, 0x15, 0x15, 0x0c, 0x0f, 0x17, 0x18, 0x16, 0x14,
+    0x18, 0x12, 0x14, 0x15, 0x14, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01,
+    0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xff, 0xc4, 0x00, 0x14, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x08, 0xff, 0xc4, 0x00, 0x14, 0x10, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x01, 0x3f, 0x00,
+    0xd2, 0xcf, 0x20, 0xff, 0xd9
+  ]);
+  beforeEach(async () => {
+    await mkdir(TEST_DIR, { recursive: true });
+    await writeFile(`${TEST_DIR}/test.txt`, textContentBuffer)
+    await writeFile(`${TEST_DIR}/test.TXT`, textContentBuffer)
+    await writeFile(path.join(TEST_DIR, 'test.jpg'), minimalJpeg);
+    await writeFile(path.join(TEST_DIR, 'test.JPG'), minimalJpeg);
+    await writeFile(`${TEST_DIR}/unknown.ext`, new Uint8Array(Buffer.from('some data')))
+  });
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+  test('On GET at /files/test.txt, server should return the file contents', async () => {
+    const filePath = `test_files/test.txt`
+    const url = `${BASE_URL}/files/${filePath}`
+    const apiResponseText = await (await getResponse(url)).text()
+    const filetext = (await readFile(resolve(`${import.meta.dirname}/../examples/${filePath}`))).toString()
+    assert.strictEqual(apiResponseText, filetext)
+  })
+  test('On GET at /files/random.txt, server should return the file contents', async () => {
+    const id = randomUUID()
+    const filePath = `test_files/${id}`
+    const url = `${BASE_URL}/files/${filePath}`
+    const res = await getResponse(url)
+    const json = await res.json()
+    assert.strictEqual(res.status, 404)
+    assert.strictEqual(json.message, `${id} not found.`)
+  })
+  test('On GET at /files/test.txt, server should return the file contents with correct Content-Type', async () => {
+    const filePath = 'test_files/test.txt'
+    const url = `${BASE_URL}/files/${filePath}`
+    const res = await getResponse(url)
+  
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers.get('content-type'), 'text/plain; charset=utf-8')
+    assert.strictEqual(res.headers.get('accept-ranges'), 'bytes')
+  
+    const apiResponseText = await res.text()
+    assert.strictEqual(apiResponseText.trim(), textContent.trim())
+  })
+  
+  test('On GET at /files/test.png, server should return the image with correct Content-Type and exact bytes', async () => {
+    const filePath = 'test_files/test.jpg'
+    const url = `${BASE_URL}/files/${filePath}`
+    const res = await getResponse(url)
+  
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers.get('content-type'), 'image/jpeg')
+    assert.strictEqual(res.headers.get('accept-ranges'), 'bytes')
+  
+    const buffer = Buffer.from(await res.arrayBuffer())
+    const fileData = await readFile(resolve(`${import.meta.dirname}/../examples/test_files/test.jpg`))
+    assert.strictEqual(buffer.length, fileData.length)
+    assert.ok(buffer.equals(fileData))
+  })
+  
+  test('On GET at non-existent random file, server should return 404 with filename in message', async () => {
+    const id = randomUUID()
+    const filePath = `test_files/${id}.txt`
+    const url = `${BASE_URL}/files/${filePath}`
+    const res = await getResponse(url)
+    const json = await res.json()
+  
+    assert.strictEqual(res.status, 404)
+    assert.strictEqual(json.message, `${id}.txt not found.`)
+  })
+  
+  test('On GET at file with unknown extension, server should use application/octet-stream', async () => {
+    const unknownFileName = 'unknown.ext'
+    await writeFile(path.join(TEST_DIR, unknownFileName), 'some data')
+  
+    const filePath = `test_files/${unknownFileName}`
+    const url = `${BASE_URL}/files/${filePath}`
+    const res = await getResponse(url)
+  
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers.get('content-type'), 'application/octet-stream')
+    assert.strictEqual(await res.text(), 'some data')
+  })
+  
+  test('Path traversal with ../ should not allow access outside test_files directory', async () => {
+    const url = `${BASE_URL}/files/../examples/test_files/test.txt`
+    const res = await getResponse(url)
+    assert.notStrictEqual(res.status, 200) // Should be 404 (or 400/403 if sanitized better)
+  })
+  
+  test('Path traversal with encoded %2e%2e should be blocked', async () => {
+    const url = `${BASE_URL}/files/%2e%2e/%2e%2e/examples/test_files/test.txt`
+    const res = await getResponse(url)
+    assert.notStrictEqual(res.status, 200)
+  })
+  
+  test('Path traversal with null byte %00 should be rejected (if not already handled by framework)', async () => {
+    const url = `${BASE_URL}/files/test_files/test.txt%00../../etc/passwd`
+    const res = await getResponse(url)
+    assert.notStrictEqual(res.status, 200)
+  })
+  
+  test('Request for directory (trailing slash) should not serve or list contents', async () => {
+    const url = `${BASE_URL}/files/test_files/`
+    const res = await getResponse(url)
+    assert.notStrictEqual(res.status, 200) // Expect 404 or 400, no directory listing
+  })
+  
+  test('File with multiple extensions should use MIME based on final extension', async () => {
+    const multiFile = 'archive.tar.gz'
+    await writeFile(path.join(TEST_DIR, multiFile), 'gzipped tar')
+  
+    const filePath = `test_files/${multiFile}`
+    const url = `${BASE_URL}/files/${filePath}`
+    const res = await getResponse(url)
+  
+    assert.strictEqual(res.status, 200)
+    const ct = res.headers.get('content-type')
+    assert.ok(ct.includes('gzip') || ct.includes('octet-stream'))
+  })
+  
+  test('Case-insensitive extension handling', async () => {
+    const upperFile = 'test.JPG'
+    // await writeFile(path.join(TEST_DIR, upperFile), imageContent)
+    const filePath = `test_files/${upperFile}`
+    const url = `${BASE_URL}/files/${filePath}`
+    const res = await getResponse(url)
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers.get('content-type'), 'image/jpeg')
+  })
+  
+  test('Query parameters should be ignored and file still served correctly', async () => {
+    const url = `${BASE_URL}/files/test_files/test.txt?cache_bust=123`
+    const res = await getResponse(url)
+  
+    assert.strictEqual(res.status, 200)
+    const text = await res.text()
+    assert.strictEqual(text.trim(), textContent.trim())
+  })
+  
+});
