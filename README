@@ -22,6 +22,12 @@ Like the Vajra, this server delivers maximum power in minimal form.
 
 ## Changelog
 
+### 1.5.1 (2026-01-04)
+- Adds a pre-allocated buffer based body reader for improvement.
+
+### 1.5.0 (2026-01-03)
+- Adds support for res.sendFile.
+
 ### 1.4.3 (2026-01-02)
 - Adds guardrails for unsafe operations with template paths.
 
