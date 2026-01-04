@@ -62,13 +62,14 @@ export default class Vajra {
       if (req.method === 'GET' || req.method === 'HEAD') { return runMiddlwares() }
       async function runMiddlwares() { let idx = 0; const next = async () => { if (idx >= Vajra.#middlewares.length) { return setImmediate(handleRoute) } const fn = Vajra.#middlewares[idx]; idx++; try { await fn(req, res, next); } catch (err) { return default_500({ url: req.url, method: req.method }, res, err); } }; await next(); }
       setImmediate(() => {
-        req.body = {}; req.rawData = ''; req.formData = {}; let dataSize = 0
-        req.on('data', (chunk) => { dataSize += chunk.length; if (dataSize > Vajra.#MAX_FILE_SIZE) { return default_413(res) }; req.rawData+=chunk })
+        req.body = {}; req.rawData = ''; req.formData = {}; let totalSize = 0; let chunks = []
+        req.on('data', (chunk) => { if (totalSize + chunk.length > Vajra.#MAX_FILE_SIZE) { return default_413(res) }; chunks.push(chunk); totalSize += chunk.length; })
         const formDataMatcher = /Content-Disposition: form-data; name=['"](?<name>[^"']+)['"]\s+(?<value>.*?)$/smi;
         let boundaryMatch = (req.headers['Content-Type'] || '').match(/boundary=(.*)/); const boundary = boundaryMatch ? '--' + boundaryMatch[1] : null; const fileDataMatcher = /^Content-Disposition:.*?name=["'](?<field>[^"']+)["'].*?filename=["'](?<fileName>[^"']+)["'].*?Content-Type:\s*(?<contentType>[^\r\n]*)\r?\n\r?\n(?<content>[\s\S]*)$/ims
         req.on('end', async () => {
-          req.files = []; if (boundary) {
-            req.rawData.split(boundary).filter(Boolean).map((line) => {
+          const buffer = Buffer.allocUnsafe(totalSize); let offset = 0;
+          for (const chunk of chunks) { chunk.copy(buffer, offset); offset += chunk.length; }
+          req.rawData = buffer.toString(); req.files = []; if (boundary) { req.rawData.split(boundary).filter(Boolean).map((line) => {
               let key, value; if (line.includes('filename')) { req.files.push(fileDataMatcher.exec(line)?.groups || {}); return }
               [key, value] = Object.values(line.match(formDataMatcher)?.groups || {}); (key && value) && Object.assign(req.formData, { [key]: value }); return
             })
