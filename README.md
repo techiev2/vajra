@@ -22,6 +22,12 @@ Like the Vajra, this server delivers maximum power in minimal form.
 
 ## Changelog
 
+### 1.5.3 (2026-01-14)
+- Downgrades createServer to come from http module. Secure server support to be provided in a later minor version.
+
+### 1.5.2 (2026-01-12)
+- Upgrades createServer to come from https module on snyk suggestion.
+
 ### 1.5.1 (2026-01-04)
 - Adds a pre-allocated buffer based body reader for improvement.
 
