@@ -1,4 +1,4 @@
-import { createServer } from 'node:https'
+import { createServer } from 'node:http'
 import { readFile, access } from 'node:fs/promises'
 import { createReadStream, existsSync } from 'node:fs'
 import { resolve } from 'path'
